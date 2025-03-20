@@ -1,0 +1,410 @@
+#library
+```{r}
+library(ggplot2)
+library(microbiome)
+library(dplyr)
+library(tidyr)
+```
+
+#load_phyloseq
+```{r}
+ps_metaphlan <- readRDS('./DATA/metaphlann_sgb.rds')
+ps_mag <- readRDS('./DATA/mag.rds')
+
+```
+
+#colors
+```{r}
+c25 <- c("gray70",
+  "dodgerblue2", "#E31A1C", # red
+  "green4",
+  "#6A3D9A", # purple
+  "#FF7F00", # orange
+   "gold1",
+  "skyblue2", "#FB9A99", # lt pink
+  "palegreen2",
+  "#CAB2D6", # lt purple
+  "#FDBF6F", # lt orange
+   "khaki2",
+  "maroon", "orchid1", "deeppink1", "blue1", "steelblue4",
+  "darkturquoise", "green1", "yellow4", "yellow3",
+  "darkorange4", "brown","magenta"  ,      'orange',                     
+ 'skyBlue',
+ 'Green',                   
+ 'yellow',                      
+  'blue',                      
+  'aquamarine',
+ '#DC3220',
+  '#4B0092',
+  '#E1BE6A',
+  'black',
+ '#40B0A6',
+  '#994F00',
+  "pink3","black"
+)
+
+c10 <- c('#9381ff','#ff594c',
+'#34b9ed','#cc7daa',
+'#1d8dcf',
+'#024cc1','#f0e74c',
+'#a100bf',
+
+'#bf4380',
+
+'#f7b126'
+)
+c18 <- c(
+  '#cdb4db',
+'#ffafcc',
+'#780000',
+'#606c38',
+
+'#003049',
+'#669bbc',
+
+'#283618',
+'#fefae0',
+'#dda15e',
+'#bc6c25',
+'#bde0fe',
+'#ffb703',
+'#fb8500',
+'#ccd5ae',
+'#a7c957',
+'#4a4e69',
+'#7209b7',
+'#f72585')
+  
+size=20
+theme1 = theme(
+    plot.title =        element_text(size = rel(1.5) , 
+                                       face = 'bold', hjust = -0.05, 
+                                       vjust = 1.5, colour = '#3B3B3B'),
+    line =              element_line(colour = '#DADADA', size = 0.75, 
+                                       linetype = 1, lineend = "butt"),
+    text =              element_text( face = "plain",
+                                       colour = "#656565",
+                                       hjust = 0.5, vjust = 0.5, angle = 0, 
+                                       lineheight = 0.9,size = 10),
+    legend.position = 'right',
+      
+      complete = TRUE,panel.grid.major =  element_line(),
+      panel.grid.minor =  element_blank(),
+      
+      # Modified inheritance structure of rect element
+      plot.background =   element_rect(),
+      panel.background =  element_rect(),
+      legend.key =        element_rect(colour = '#DADADA'),
+    axis.text = element_text(size=15,face='plain'),
+    legend.text = element_text(size=15,face='plain'),
+    legend.title = element_text(size = 20 , 
+                                       face = 'bold', colour = '#3B3B3B'),
+    axis.title =  element_text(size = 20 , 
+                                       face = 'bold', colour = '#3B3B3B')
+  )
+```
+#Suppl Fig 1B
+```{r,fig.height=5,fig.width=8}
+df <- as.data.frame(sample_data(ps_metaphlan))
+df$BMI_correct <- df$weight_kg/(df$mean_height_cm/100)**2
+
+df$BMI_correct <- as.numeric(df$BMI_correct)
+
+df$bmi_group <- ifelse(df$BMI_correct <= 25, 'bmi<=25',
+            ifelse(df$BMI_correct <= 30, '25<bmi<=30',
+            'bmi>30'))
+
+df$bmi_group <- factor(df$bmi_group,levels=c('bmi<=25','25<bmi<=30','bmi>30'))
+
+
+
+p <- ggplot(df, aes(x = BMI_correct, fill = bmi_group)) +
+  geom_histogram(binwidth = 1, position = "identity", alpha = 0.8,color='black') + # Используйте geom_histogram, задайте прозрачность
+  labs(
+       x = "BMI_correct",
+       y = "Count") +
+  theme_minimal() +
+  scale_fill_manual(values = c('#2a9d8f','#f77f00','#c1121f'))  # Используйте приятную палитру цветов
+
+# Добавление вертикальных линий для разделения bmi_group (пример)
+# Вам нужно будет определить значения x для разделения групп
+# Пример: если группы разделяются значениями 25 и 30
+p <- p + geom_vline(xintercept = c(25, 30), color = "black", linetype = "dashed")
+
+print(p)
+```
+
+```{r}
+# Load the phyloseq library
+library(phyloseq)
+library(dplyr)
+library(tidyr)
+
+# Read the table from the specified file path.  This table likely contains the abundance 
+# information for different metabolic modules in the samples.  The separator is tab, 
+# there's a header row, and the first column contains the row names.
+table_from_file <- read.table('~/DAVID_WGS/binning/DASTool/TABLES/METABOLISM_copy_number-module_stepwise_presence-MATRIX.txt_17&22.txt',
+                 sep = "\t",
+                             header = TRUE, row.names = 1)
+
+# Read taxonomic information from a tsv file. Row names are in the first column and there is a header
+tax_tab <- read.csv('/mnt/disk1/PROJECTS/DAVID_WGS/taxa/inStrain/all_taxa_tax.tsv',sep='\t',row.names = 1,header = T)
+
+# Read metadata from a csv file with sample information, row names are in the first column.
+metadata <- read.csv('/mnt/disk1/PROJECTS/DAVID_WGS/filt_df_pheno_wgs_bmi_group.csv',sep=',',row.names = 1)
+
+# Read taxonomic information for 2022 samples from another tsv file. Again, row names are in the first column and there is a header
+tax_tab_22 <- read.csv('/mnt/disk1/PROJECTS/DAVID_WGS/taxa/inStrain/all_taxa_tax_2022.tsv',sep='\t',row.names = 1,header = T)
+
+# Set the row names for the taxonomic tables using the 'bin_name' column.
+rownames(tax_tab) <- tax_tab$bin_name
+rownames(tax_tab_22) <- tax_tab_22$bin_name
+
+# Combine the taxonomic information from both time points (2017 & 2022).
+tax_tab <- rbind(tax_tab,tax_tab_22)
+
+# Select only the taxonomic ranks of interest from the taxonomic table.
+tax_tab <- tax_tab[,c("Kingdom" ,"Phylum"  , "Class" ,   "Order" ,   "Family",   "Genus"  ,  "Species")]
+
+# Convert the selected taxonomic data to a data frame.
+metagenomes <- as.data.frame(tax_tab)
+
+# Read module information, header = TRUE means that the first row is a header and sep="\t" means that the file use tabs
+module_info = read.table("./DATA/ALL_MODULES_INFO.txt", header = TRUE, sep="\t",row.names = 1)
+
+# Convert taxonomic table to a matrix. This is required for phyloseq.
+tax_tab <- as.matrix(tax_tab)
+
+# Convert abundance table to a matrix and transpose it (taxa_are_rows = TRUE later on)
+otu_tab <- as.matrix(t(table_from_file))
+
+# Create an otu_table object for phyloseq.
+OTU <- otu_table(otu_tab, taxa_are_rows = TRUE)
+
+# Create a tax_table object for phyloseq.
+TAX <- phyloseq::tax_table(tax_tab)
+
+# Create a sample_data object for phyloseq from the module information.
+samples <- sample_data(module_info)
+
+# Create the phyloseq object by combining the OTU table, taxonomic table, and sample data.
+ps <- phyloseq(OTU,TAX, samples)
+
+# Store the initial phyloseq object for later use.
+ps_obj <- ps
+
+# Extract the taxonomic table from the phyloseq object and convert it to a data frame.
+df <- tax_table(ps) %>%
+  as.data.frame()
+
+# Add bin names as a column
+df$bin_name <- rownames(df)
+
+# Create a 'sample' column by splitting the bin names. This assumes a specific naming convention.
+df$sample <- sapply(strsplit(rownames(df), split = "[_\\.]"),function(x) paste(x[1], x[2], sep = "_"))
+
+# Merge the taxonomic data frame with the metadata using the 'sample' column as the key.
+df <- merge(df,metadata,by.x='sample',by.y='row.names',all.x=T)
+
+# Set the row names to bin_name
+rownames(df) <- df$bin_name
+
+# Calculate BMI from weight (kg) and height (cm)
+df$BMI_correct <- df$weight_kg/(df$mean_height_cm/100)**2
+
+# Ensure BMI is numeric
+df$BMI_correct <- as.numeric(df$BMI_correct)
+
+#Create BMI Groups
+df$bmi_group <- ifelse(df$BMI_correct <= 25, 'bmi<=25',
+            ifelse(df$BMI_correct <= 30, '25<bmi<=30',
+            'bmi>30'))
+
+# Create BMI Groups
+df$bmi_group <- factor(df$bmi_group,levels=c('bmi<=25','25<bmi<=30','bmi>30'))
+
+# Assign the modified sample data frame to the phyloseq object.
+ps@sam_data <- sample_data(df)
+
+# Convert the OTU table from the phyloseq object to a data frame.
+otu_table_df <- as.data.frame(otu_table(ps_obj))
+
+# Convert the OTU table from wide to long format
+otu_long <- otu_table_df %>%
+  rownames_to_column(var = "Bacteria") %>%
+  pivot_longer(-Bacteria, names_to = "Pathway", values_to = "Abundance")
+
+# Summarize the abundance for each Bacteria by summing across all pathways
+otu_long <- otu_long %>%
+  dplyr::select(-Pathway) %>%  
+  group_by(Bacteria) %>%  
+  summarise(Total_Abundance = sum(Abundance, na.rm = TRUE), .groups = 'drop')
+
+# Merge this summarized abundance data with the metadata (df)
+otu_long <- merge(otu_long,df,by.x= 'Bacteria',by.y='row.names',all.x=T)
+
+```
+
+#Среднее кол-во путей в группах 
+```{r,fig.width=15,fig.height=10}
+library(tidyverse) # For data manipulation and plotting
+library(tidyquant) # For quantitative financial analysis (though not directly used here, it's loaded)
+library(ggdist)   # For distributional plotting (e.g., half-eye plots)
+library(ggthemes)  # For extra themes
+library(ggrepel)   # For repelling text labels to avoid overlap
+library(rstatix)   # For statistical tests
+
+# Define a color palette for different phyla.  This ensures consistent colors across plots.
+colors <- c("Actinobacteriota" ='#b2d1e3',
+               "Verrucomicrobiota" = '#34b9ed',
+               "Proteobacteria"  ='#cc7daa',
+               "Firmicutes_C" ='#1d8dcf',
+               "Bacteroidota" ='#024cc1',
+               "Firmicutes" =  '#f0e74c',   
+              "Firmicutes_A"  ='#a100bf',
+               "Methanobacteriota" ='#bf4380',
+               "Desulfobacterota_I" ='#f7b126',
+               "Elusimicrobiota" ='#ff594c',
+               "Fusobacteriota" ="magenta",
+               "Synergistota" ="pink3"
+)
+
+# Convert 'bmi_group' to a factor with specific levels.  This ensures a consistent order in plots.
+otu_long$bmi_group <- factor(otu_long$bmi_group,levels=c('bmi<=25','25<bmi<=30','bmi>30'))
+
+# Remove rows where 'bmi_group' is NA.  This prevents errors in downstream analysis.
+otu_long <- otu_long %>%
+ filter(!is.na(bmi_group))
+
+# Perform pairwise Wilcoxon tests to compare 'Total_Abundance' across 'bmi_group' levels.
+#   - compare_means:  performs the specified statistical test.
+#   - method = "wilcox.test": Uses Wilcoxon rank-sum test (non-parametric test for two groups).
+#   - p.adjust.method = "BH": Applies Benjamini-Hochberg correction for multiple testing.
+#   - add_significance("p.adj"): Adds significance labels based on adjusted p-values.
+#   - add_x_position(x = 'bmi_group'): Adds x-axis positions for plotting significance bars.
+#   - add_y_position(...): Calculates y-axis positions for the significance bars.
+anno_df <- ggpubr::compare_means(
+  as.formula(paste("Total_Abundance ~ bmi_group")), # Dynamically construct the formula
+  data = otu_long, 
+  method = "wilcox.test", 
+  p.adjust.method = "BH"
+) %>%
+  add_significance("p.adj") %>%
+  add_x_position(x = 'bmi_group') %>%
+  add_y_position(data = otu_long, formula = as.formula(paste("Total_Abundance ~ bmi_group")), step.increase = 0.2)
+
+# Define the levels of bmi_group
+level_factors <- c('bmi<=25','25<bmi<=30','bmi>30')
+
+# The code iterates through the 'anno_df' to assign xmin and xmax based on the position of 'group1' and 'group2' in 'level_factors'
+for (i in 1:nrow(anno_df)) {
+  # Check group1
+  if (anno_df$group1[i] %in% level_factors) {
+    anno_df$xmin[i] <- which(level_factors == anno_df$group1[i]) # Get the ordinal number for xmin
+  }
+  
+  # Check group2
+  if (anno_df$group2[i] %in% level_factors) {
+    anno_df$xmax[i] <- which(level_factors == anno_df$group2[i]) # Get the ordinal number for xmax
+  }
+}
+
+# Calculate mean and standard error of 'Total_Abundance' for each 'bmi_group'.
+Means <- otu_long %>%
+  group_by(bmi_group) %>%
+  summarize(Avg = mean(Total_Abundance), 
+            SE = sd(Total_Abundance) / sqrt(n()), # Standard error
+            .groups = 'drop') %>%
+  filter(!is.na(bmi_group)) # Remove any group with NA bmi_group
+colnames(Means) <- c('bmi_group','Total_Abundance','SE') # Rename column names for clarity
+
+# Load rstatix again (redundant, but doesn't hurt)
+library(rstatix)
+
+#  Create the ggplot visualization:
+#   - geom_halfeye: Creates distributional plots (half-eye plots) representing the distribution of 'Total_Abundance' within each 'bmi_group', filled by 'Phylum'.
+#   - geom_boxplot: Adds boxplots to show the median, quartiles, and outliers.
+#   - geom_line: Adds lines connecting the means of 'Total_Abundance' across 'bmi_group' levels.
+#   - geom_ribbon: Adds shaded areas representing the standard error around the means.
+#   - geom_text_repel: Adds text labels for specific data points (Species) while avoiding overlap.
+g3 <- ggplot(otu_long, aes(x = bmi_group, y = Total_Abundance)) +
+  stat_halfeye(aes(thickness = after_stat(pdf*n),fill = Phylum), # Use after_stat to calculate thickness
+               adjust = 0.3, # Adjust smoothing of density estimate
+               width=1, # Control the height of the curves
+               justification = -0.2,
+               .width=0, # Set .width=0 to remove the credible interval shading from stat_halfeye
+               #slab_color = 'grey', # Color for the slab (density line)
+               alpha = 0.8) + # Transparency for the half-eye plots
+  geom_boxplot(width = 0.12, outlier.color ="black", alpha = 0.5) + # Boxplots
+  
+  # Add lines connecting the average values
+  geom_line(data = Means, aes(x = bmi_group, y = Total_Abundance), color = "black", size = 1,group=1) +
+  
+  # Add confidence intervals
+  geom_ribbon(data = Means, aes(x = bmi_group, ymin = Total_Abundance - SE, ymax = Total_Abundance + SE), alpha = 0.6) + # Set inherit.aes=FALSE
+  
+  scale_fill_manual(values = colors)+ # Use predefined color palette to coloring by Phylum
+  #ggtitle("Number of Pathways for Each Bacterium by Group") + # Set plot title
+  theme1+ # Apply a predefined theme named 'theme1'
+  geom_text_repel(data = subset(otu_long, Total_Abundance < 10 | Total_Abundance > 90), # Select specific data for labeling
+                  aes(label = Species),  # Use the 'Species' column for text labels
+                  size = 4,   # Text size
+                  nudge_y = 5,   # Adjust y position to avoid overlapping
+                  show.legend = FALSE,  # Hide legend for these labels
+                  max.overlaps = Inf)  # Allow all labels to be plotted, even if they overlap initially
+  
+  
+g3 # Display the created plot
+
+# Save the plot to a file with specific dimensions and DPI.  This is important for high-resolution figures.
+ggsave("./figures/Supp6.png", plot=g3, width=20, height=10,dpi=300)
+
+```
+
+#Barplot
+```{r}
+source('./code/barplot_hierarchical.R')
+ps <- readRDS('./DATA/humann.rds')
+df <- as.data.frame(sample_data(ps))
+df$BMI_correct <- df$weight_kg/(df$mean_height_cm/100)**2
+df$BMI_correct <- as.numeric(df$BMI_correct)
+df$year <- df$YEAR
+df$bmi_group <- ifelse(df$BMI_correct <= 25, 'bmi<=25',
+            ifelse(df$BMI_correct <= 30, '25<bmi<=30',
+            'bmi>30'))
+
+df$bmi_group <- factor(df$bmi_group,levels=c('bmi<=25','25<bmi<=30','bmi>30'))
+ps@sam_data <- sample_data(df)
+
+ps_obj <- ps
+
+ps_obj <- subset_samples(ps_obj,(ps_obj@sam_data$Without_repeats =='TRUE' )) 
+list_of_unique <- c('V350181201_26','V350181201_27','V350181201_28')
+ps_obj <- subset_samples(ps_obj,!rownames(ps_obj@sam_data) %in% list_of_unique )
+
+coln <- colnames(ps_obj@tax_table)
+tax_table_oth <- tax_table_other(coln)
+
+
+#level = 'Species'
+level = 'class_name'
+ps_obj <- speedyseq::tax_glom(ps_obj,taxrank = level, NArm=T )
+#ps_obj <- preprocessing(ps_obj,taxrank= 'Genus',detection = '-',prevalence = '-')
+decreasing = T
+size <- c(1,1,10) 
+ann_colors_group <- list(BMI = c(
+  'bmi<=25' ='#2a9d8f',
+  '25<bmi<=30' = '#f77f00',
+  'bmi>30' ='#c1121f'
+))
+dist <- c('bray','aitchinson')
+
+plot_list <- map(dist, ~barplot_hierarchical(ps_obj,'class_name',detection = '-',prevalence = '-', transformation = 'compositional',feature = 'bmi_group',top = 400 ,colors_barplot = c25,colors_line = ann_colors_group$BMI ,.x,size,decreasing = T,tax_table_oth))
+
+p <- ggarrange(plotlist = plot_list,nrow =2,ncol = 1)
+p <- plot_list[[2]]
+
+
+ggsave("./figures/barplot_functions.png",p,dpi=300,height = 10,width=18)
+```
+

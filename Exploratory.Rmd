@@ -1,0 +1,842 @@
+#library
+```{r}
+library(phyloseq)
+library(data.table)
+library(ggsankey)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(ggpubr)
+library(viridis)
+library(ggalluvial)
+library(stringr)
+library(patchwork)
+library(microbiome)
+library(vegan)
+library(cowplot)
+```
+
+#colors
+```{r}
+с25  <- c(
+  "#B0B0B0",   # Light gray
+  "#A0C8E0",   # Soft blue
+  "#D68A8A",   # Soft red
+  "#A8D8B9",   # Soft green
+  "#C7A6C9",   # Soft purple
+  "#F5B58C",   # Soft orange
+  "#FCEBAF",   # Soft gold
+  "#B2D5E5",   # Light sky blue
+  "#FBB3B3",   # Light pink
+  "#D4EDDA",   # Soft pale green
+  "#EAB8E7",   # Light lavender
+  "#FCD5AA",   # Light peach
+  "#EAE6B7",   # Soft khaki
+  "#D8BFD8",   # Soft maroon/purple
+  "#EAB8E7",   # Soft orchid 
+  "#F4A6C8",   # Soft deep pink 
+  "#A4C8E1",   # Light blue 
+  "#BAC9D6",   # Soft steel blue 
+  "#B2E5E5",   # Light turquoise 
+  "#B7EBA5",   # Light green 
+  "#F3E69D",   # Light yellow 
+  "#F3E69D",   # Soft yellow 
+  "#FFCBA4",   # Light orange 
+  "#D9C0B9"    # Soft brown 
+)
+c10 <- c('#9381ff','#ff594c',
+'#34b9ed','#cc7daa',
+'#1d8dcf',
+'#024cc1','#f0e74c',
+'#a100bf',
+
+'#bf4380',
+
+'#f7b126'
+)
+```
+# load phyloseq objects
+```{r}
+ps_metaphlan <- readRDS('./DATA/metaphlann_sgb.rds')
+ps_mag <- readRDS('./DATA/mag.rds')
+```
+
+#rename group
+```{r}
+df <- as.data.frame(sample_data(ps_metaphlan))
+df$BMI_correct <- df$weight_kg/(df$mean_height_cm/100)**2
+df$BMI_correct <- as.numeric(df$BMI_correct)
+df$year <- df$YEAR
+df$bmi_group <- ifelse(df$BMI_correct <= 25, 'bmi<=25',
+            ifelse(df$BMI_correct <= 30, '25<bmi<=30',
+            'bmi>30'))
+
+df$bmi_group <- factor(df$bmi_group,levels=c('bmi<=25','25<bmi<=30','bmi>30'))
+ps_metaphlan@sam_data <- sample_data(df)
+
+df <- as.data.frame(sample_data(ps_mag))
+df$BMI_correct <- df$weight_kg/(df$mean_height_cm/100)**2
+df$BMI_correct <- as.numeric(df$BMI_correct)
+
+df$bmi_group <- ifelse(df$BMI_correct <= 25, 'bmi<=25',
+            ifelse(df$BMI_correct <= 30, '25<bmi<=30',
+            'bmi>30'))
+df$bmi_group <- factor(df$bmi_group,levels=c('bmi<=25','25<bmi<=30','bmi>30'))
+df$bmi_group <- as.factor(df$bmi_group)
+df$year <- df$YEAR
+ps_mag@sam_data <- sample_data(df)
+
+```
+#Fig2.Taxonomy comparison
+```{r,fig.width=30,fig.height=25}
+# Step 1: Read the taxonomy dictionary
+dict <- read.delim('./DATA/mpa_vOct22_CHOCOPhlAnSGB_202212_SGB2GTDB.tsv', sep = '\t', header = FALSE)
+
+# Step 2: Split the taxonomy information into separate columns
+split_data <- strsplit(dict$V2, ';')
+species_df <- data.frame(matrix(unlist(split_data), nrow = length(split_data), byrow = TRUE), stringsAsFactors = FALSE)
+
+# Step 3: Rename columns to represent taxonomic ranks
+colnames(species_df) <- c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species")
+
+# Step 4: Remove prefixes (everything before and including "__")
+species_df <- species_df %>%
+  mutate(across(everything(), ~ gsub(".*__", "", .)))
+
+# Step 5: Combine the original dictionary with the new species data
+dict <- cbind(dict, species_df)
+
+# Step 6: Aggregate taxa at the specified level (Species)
+#level = 'Species'
+#ps_obj <- speedyseq::tax_glom(ps_metaphlan, taxrank = level, NArm = TRUE)
+
+# Step 7: Subset samples based on specific criteria
+ps_obj <- subset_samples(ps_metaphlan, (ps_metaphlan@sam_data$Without_repeats == 'True'))
+list_of_unique <- c('V350181201_26','V350181201_27','V350181201_28')
+ps_obj <- subset_samples(ps_obj,!rownames(ps_obj@sam_data) %in% list_of_unique )
+ps_obj <- subset_taxa(ps_obj, Kingdom != 'UNCLASSIFIED')
+
+# Step 8: Extract taxa and sample data
+taxa <- as.data.frame(ps_obj@tax_table)
+
+# Step 9: Prepare taxa data for merging with sample data
+taxa$sample <- rownames(taxa)
+taxa <- taxa %>%
+  select(Kingdom, Phylum, sample)
+
+# Step 10: Extract OTU table 
+otu_table <- as.data.frame(otu_table(ps_obj))
+
+# Step 11: Calculate the number of species 
+species_count <-otu_table %>%
+  gather(key = "Species", value = "count") %>%
+  group_by(Species) %>%
+  summarise(total_count = sum(count > 0)) %>% # Count unique species per group
+  ungroup()
+
+# Step 12: Prepare for merging with taxa information
+species_count$sample <- species_count$Species
+
+df2 <- species_count %>%
+  left_join(taxa, by = 'sample')
+
+# Step 13: Merge with the original dictionary for additional information
+df2 <- merge(df2, dict, by.x = 'sample', by.y = 'V1', all.x = TRUE)
+
+
+
+# Define a function to create Sankey plots
+sankey_plot_function <- function(df){
+  pl <- ggplot(df, aes(x = x,                        
+                     next_x = next_x,                                     
+                     node = node,
+                     next_node = next_node,        
+                     fill = factor(node),
+                     label = paste0(node,'\n n=',n,'(',percentage,')')))            
+                     
+  pl <- pl + geom_sankey(flow.alpha = 0.7,           
+                      node.color = "black",           
+                      show.legend = TRUE)        
+
+  pl <- pl + geom_sankey_label(size = 3, 
+                             color = "black", 
+                             fill = "white") 
+
+  pl <- pl + 
+    #scale_fill_viridis_d(option = "D", alpha = 0.95) +
+    theme_bw() +
+    theme(legend.position = "none",
+          plot.background = element_rect(fill = "white", color = NA),
+          axis.title = element_blank(),
+          axis.text.y = element_blank(),
+          axis.text.x = element_text(face = "bold", size = 14),
+          panel.grid.major.y = element_blank(),
+          panel.grid.minor.y = element_blank(),
+          plot.title = element_blank(),
+          plot.subtitle = element_blank(),
+          plot.caption = element_blank(),
+          plot.margin = margin(10, 40, 10, 20)
+          ) +
+    scale_x_discrete(labels=c('CHOCOPhlAn', 'GTDB'))+
+  
+  scale_fill_manual(values = с25)
+
+  return(pl)
+}
+
+df2$Phylum.x <- str_replace_all(df2$Phylum.x, "_", "\n")
+# Filter specific phyla for plotting
+unique_phylum <- c("Proteobacteria", "Bacteroidetes", "Firmicutes", 
+                   "Actinobacteria", "Fusobacteria", "Ascomycota",
+                   "Eukaryota\nunclassified", "Tenericutes", 
+                   "Cyanobacteria", "Bacteria\nunclassified",
+                   "Synergistetes", "Thaumarchaeota",
+                   "Verrucomicrobia", "Spirochaetes",
+                   "Lentisphaerae", "Elusimicrobia",
+                   "Candidatus\nSaccharibacteria", 
+                   "Candidatus\nMelainabacteria",
+                   "Candidatus\nThermoplasmatota",
+                   "Euryarchaeota")
+
+# Initialize an empty list to store plots
+plot_list <- list()
+df2
+for(elem in unique_phylum) {
+  
+    # Filter data for the current phylum
+    df_filtered <- df2 %>%
+      filter(Phylum.x == elem)
+    
+    alluvial_data <- df_filtered %>%
+      make_long(Phylum.x, Phylum.y)
+
+    dagg_filtered <- alluvial_data %>%
+      group_by(node, next_x) %>% 
+      filter(is.na(next_x)) %>% # Group by 'node' and filter out NA values
+      tally() 
+
+    dagg_filtered <- dagg_filtered %>%
+      group_by(next_x) %>%
+      mutate(percentage = round(n / sum(n) * 100, 2)) %>% # Calculate percentage of each node
+      ungroup()
+
+    # Format percentage as a string with a '%' sign
+    dagg_filtered <- dagg_filtered %>%
+      mutate(percentage = paste(percentage, '%'))
+    
+    # Select relevant columns from dagg_filtered
+    dagg_filtered <- dagg_filtered %>%
+      select(node,n,percentage)
+    
+    summa <- sum(dagg_filtered$n, na.rm=TRUE) # Sum counts while ignoring NA values
+
+    # Merge alluvial data and counts for final preparation
+    df_final_plotting <- merge(alluvial_data, dagg_filtered, by.x='node', by.y='node', all.x=TRUE)
+
+    # Apply conditions to modify values in df_final_plotting
+    df_final_plotting <- df_final_plotting %>%
+      mutate(
+        percentage=ifelse(node==elem & !is.na(next_x), '100%', percentage), # Condition for percentage
+        n=ifelse(node==elem & !is.na(next_x), summa, n) # Condition for n value adjustment
+      )
+    
+    plot_list[[elem]] <- sankey_plot_function(df_final_plotting) # Store each plot in the list
+    
+}
+plot_list
+# Arrange and display all plots in a grid layout
+p1 <- ggarrange(plotlist=plot_list,ncol=5,nrow=4,heights=c(2,1,1,1))
+#p1 <- annotate_figure(p1,
+#  top = text_grob("Comparison between CHOCOPhlAn and GTDB",
+#    color = "black", face = "bold", size = 16
+#  )
+#)
+print(p1)
+
+# Optionally save the final plot to a file (uncomment to use)
+ggsave("./figures/Metaphlan-GTDB.png", plot=p1, width=28, height=20, dpi=300)
+
+```
+## Propotion of taxa
+```{r,fig.width=20,fig.height=15}
+generate_sankey_plot_from_ps <- function(ps_obj,database) {
+
+  taxa <- as.data.frame(ps_obj@tax_table)
+  sam_data <- as(ps_obj@sam_data, 'data.frame')
+  sam_data$sample <- rownames(sam_data)
+
+
+  split_function <- function(string) {
+    parts <- strsplit(string, '_')[[1]]
+    if (length(parts) < 2) {
+      return(NA)
+    }
+    second_part_split <- strsplit(parts[2], '[.]')[[1]]
+    p <- paste(parts[1], second_part_split[1], sep = '_')
+    return(p)
+  }
+
+
+  rownames_tax_table <- rownames(taxa)
+  taxa$sample <- sapply(rownames_tax_table, split_function)
+
+
+  taxa <- taxa %>%
+    left_join(sam_data, by = 'sample') %>%
+    select(Kingdom, Phylum)
+
+
+  df <- taxa %>%
+    make_long(Kingdom, Phylum)
+
+
+  dagg <- df %>%
+    group_by(node, next_x) %>%
+    tally() 
+
+  dagg <- dagg %>%
+    group_by(next_x) %>%
+    mutate(percentage = round(n / sum(n) * 100, 2)) %>%
+    ungroup() %>%
+    mutate(percentage = paste(percentage, '%')) %>%
+    select(node, n, percentage)
+
+
+  df2 <- merge(df, dagg, by.x = 'node', by.y = 'node', all.x = TRUE)
+
+
+  pl <- ggplot(df2, aes(x = x,                        
+                         next_x = next_x,                                     
+                         node = node,
+                         next_node = next_node,        
+                         fill = factor(node),
+                         label = paste0(node,' n=',n,'(',percentage,')')))             # Создание метки для каждого узла
+
+  pl <- pl + geom_sankey(flow.alpha = 0.5,
+                         node.color = "black",
+                         show.legend = TRUE)
+
+  pl <- pl + geom_sankey_label(size = 3,
+                                color = "black", 
+                                fill = "white")
+
+  pl <- pl + theme_minimal(base_size = 20) +
+    theme(legend.position = "none",
+          plot.background = element_rect(fill = "grey99", color = NA),
+          axis.title = element_blank(),
+          axis.text.y = element_blank(),
+          axis.text.x = element_text(face = "bold", size = 14),
+          panel.grid.major.y = element_blank(),
+          panel.grid.minor.y = element_blank(),
+          plot.title = element_text(face = "bold", size = 16),
+          plot.subtitle = element_text(lineheight = 1),
+          plot.caption = element_text(margin = margin(10, 0, 0, 0), hjust = 0),
+          plot.margin = margin(10, 40, 10, 20))+
+  
+  scale_fill_manual(values = с25)#+
+    #labs(title = paste('Taxa distribution in ',database))
+
+  return(pl) 
+}
+det <- 1
+prev<- 1/100
+level <- 'Species'
+ps_obj <- speedyseq::tax_glom(ps_metaphlan,taxrank = level, NArm=T )
+taxas <- core_members(ps_obj, detection = det, prevalence = prev)
+ps_obj <- subset_samples(ps_obj, (ps_obj@sam_data$Without_repeats == 'True'))
+list_of_unique <- c('V350181201_26','V350181201_27','V350181201_28')
+ps_obj <- subset_samples(ps_obj,!rownames(ps_obj@sam_data) %in% list_of_unique )
+ps_obj <- subset_taxa(ps_obj, Kingdom != 'UNCLASSIFIED')
+ps_obj <- prune_taxa(taxas, ps_obj)
+p_2 <- generate_sankey_plot_from_ps(ps_obj,'CHOCOPhlAn')
+ps_obj <- speedyseq::tax_glom(ps_mag,taxrank = level, NArm=T )
+taxas <- core_members(ps_obj, detection = det, prevalence = prev)
+ps_obj <- prune_taxa(taxas, ps_obj)
+ps_obj <- subset_samples(ps_obj, (ps_obj@sam_data$Without_repeats == 'True'))
+list_of_unique <- c('V350181201_26','V350181201_27','V350181201_28')
+ps_obj <- subset_samples(ps_obj,!rownames(ps_obj@sam_data) %in% list_of_unique )
+p_3 <- generate_sankey_plot_from_ps(ps_obj,'GTDB')
+final_plot <- ggarrange(p1,ggarrange(p_2,p_3,ncol=1,nrow=2),ncol=2,nrow=1,widths = c(2,1),labels=c('A','B')) 
+final_plot
+ggsave("./figures/Fig2.png", plot=final_plot, width=24, height=14, dpi=300)
+```
+#Fig3.PERMANOVA
+```{r,fig.width = 20,fig.height=10}
+source("./code/permanova.R")
+
+ps_obj <- ps_metaphlan
+
+level <- 'Species'
+det <- 1
+prev<- 1/100
+
+
+ps_obj <- speedyseq::tax_glom(ps_obj,taxrank = level, NArm=T )
+taxas <- core_members(ps_obj, detection = det, prevalence = prev)
+ps_obj <- prune_taxa(taxas, ps_obj)
+ps_obj <- subset_samples(ps_obj,(ps_obj@sam_data$Without_repeats =='True'))
+ps_obj <- subset_taxa(ps_obj,Kingdom != 'UNCLASSIFIED')
+list_of_unique <- c('V350181201_26','V350181201_27','V350181201_28')
+ps_obj <- subset_samples(ps_obj,!rownames(ps_obj@sam_data) %in% list_of_unique )
+ps_obj
+
+
+
+formula <- 'sex + age_at_heath_check_10yr  + cancer+ kidney_disease + drinking_level  + liver_diseases + smoking_status + bmi_group + year'# + year'#+ batch'
+
+cols_meta <- data.frame(
+  category = c('general','general','comorbidities'
+            ,'comorbidities','lifestyle',
+            'comorbidities','lifestyle','comorbidities','technical'), 
+  row.names = c( "sex",'age_at_heath_check_10yr','cancer','kidney_disease','drinking_level',
+               
+                  'liver_diseases','smoking_status','bmi_group','year' ))#, 'batch'))
+
+cols_meta$new_name <- rownames(cols_meta)
+
+methods <- c('euclidean')#,'unifrac','wunifrac')
+# Run the plot_permanova function for both methods
+threshold <- 0
+
+plot_list <- purrr::map(methods, ~ {
+  tryCatch({
+    plot_permanova(ps_obj, formula, method = .x, 
+                   show_plot = TRUE, level = level, 
+                   det = det, prev = prev, 
+                   year = year, lab.size = lab.size, 
+                   size = 15, cols_meta= cols_meta,palette=c10,threshold =threshold ,threshold_loc_y = 16)
+  }, error = function(e) {
+    message(paste("Error in method:", .x))
+    message(e$message)  # Print the error message
+    return(NULL)  # Return NULL for this iteration
+  })
+})
+
+plot_list
+figure_Permanova_metaphlan <- ggarrange(plotlist = list(plot_list[[1]][[2]]),nrow =1,ncol = 1,labels = c('A ALIGNMENT'))
+figure_Permanova_metaphlan
+
+ps_obj <- ps_mag
+
+level <- 'Species'
+det <- 1
+prev<- 1/100
+
+ps_obj <- speedyseq::tax_glom(ps_obj,taxrank = level, NArm=T )
+taxas <- core_members(ps_obj, detection = det, prevalence = prev)
+ps_obj <- prune_taxa(taxas, ps_obj)
+ps_obj <- subset_samples(ps_obj,(ps_obj@sam_data$Without_repeats =='True'))
+list_of_unique <- c('V350181201_26','V350181201_27','V350181201_28')
+ps_obj <- subset_samples(ps_obj,!rownames(ps_obj@sam_data) %in% list_of_unique )
+ps_obj
+
+ps_obj@sam_data$batch <- as.factor(ps_obj@sam_data$YEAR)
+
+
+formula <- 'sex + age_at_heath_check_10yr  + cancer+ kidney_disease + drinking_level  + liver_diseases + smoking_status + bmi_group + year'# + year'#+ batch'
+
+cols_meta <- data.frame(
+  category = c('general','general','comorbidities'
+            ,'comorbidities','lifestyle',
+            'comorbidities','lifestyle','comorbidities','technical'), 
+  row.names = c( "sex",'age_at_heath_check_10yr','cancer','kidney_disease','drinking_level',
+               
+                  'liver_diseases','smoking_status','bmi_group','year' ))#, 'batch'))
+
+cols_meta$new_name <- rownames(cols_meta)
+
+methods <- c('euclidean')#,'unifrac','wunifrac')
+# Run the plot_permanova function for both methods
+threshold <- 0
+
+plot_list <- purrr::map(methods, ~ {
+  tryCatch({
+    plot_permanova(ps_obj, formula, method = .x, 
+                   show_plot = TRUE, level = level, 
+                   det = det, prev = prev, 
+                   year = year, lab.size = lab.size, 
+                   size = 15, cols_meta= cols_meta,palette=c10,threshold =threshold ,threshold_loc_y = 16)
+  }, error = function(e) {
+    message(paste("Error in method:", .x))
+    message(e$message)  # Print the error message
+    return(NULL)  # Return NULL for this iteration
+  })
+})
+plot_list
+
+figure_Permanova_mag <- ggarrange(plotlist = list(plot_list[[1]][[2]]),nrow =1,ncol = 1,labels = c('B DE-NOVO'))
+
+final_plot_2 <- figure_Permanova_metaphlan / figure_Permanova_mag
+final_plot_2
+ggsave("./figures/Fig3.png", plot=final_plot_2, width=20, height=12, dpi=300)
+```
+#beta and alpha 
+```{r,fig.height=10,fig.width=10}
+source("./code/beta_alpha.R")
+ps_obj <- ps_metaphlan
+
+level <- 'Species'
+det <- 10
+prev<-10/100
+
+ps_obj <- speedyseq::tax_glom(ps_obj,taxrank = level, NArm=T )
+taxas <- core_members(ps_obj, detection = det, prevalence = prev)
+ps_obj <- prune_taxa(taxas, ps_obj)
+ps_obj <- subset_samples(ps_obj,(ps_obj@sam_data$Without_repeats =='True' )) 
+ps_obj <- subset_taxa(ps_obj,Kingdom != 'UNCLASSIFIED')
+list_of_unique <- c('V350181201_26','V350181201_27','V350181201_28')
+ps_obj <- subset_samples(ps_obj,!rownames(ps_obj@sam_data) %in% list_of_unique )
+
+trans <- 'clr'
+
+distance_method <- 'euclidean'
+
+ps_obj_transform <- microbiome::transform(ps_obj, trans)
+
+ann_colors_group <- list(BMI = c(
+  'bmi<=25' ='#2a9d8f',
+  '25<bmi<=30' = '#f77f00',
+  'bmi>30' ='#c1121f'
+))
+
+ps_obj_transform@sam_data$bmi_group <- factor(ps_obj_transform@sam_data$bmi_group, level = c('bmi<=25','25<bmi<=30','bmi>30'))
+
+beta <- create_ordination_plots(ps_obj_transform, method = "PCoA", distance_method = distance_method , group = "bmi_group", size = 15,palette = ann_colors_group$BMI,
+                                level_factors = c('bmi<=25','25<bmi<=30','bmi>30'),taxa_plot = TRUE,len_axis=50)
+
+measure <- 'Shannon'
+method <- 'wilcox.test'
+
+trans <- 'compositional'
+distance_method <- 'bray'
+
+
+ps_obj_transform <- microbiome::transform(ps_obj, trans)
+
+my_comparisons <- list(c('bmi<=25','bmi>30'),c('bmi<=25','25<bmi<=30'),c('25<bmi<=30','bmi>30'))
+ps_obj_transform@sam_data$bmi_group <- factor(ps_obj_transform@sam_data$bmi_group, level = c('bmi<=25','25<bmi<=30','bmi>30'))
+alpha <- create_alpha_plots(ps_obj_transform,col = 'bmi_group',measure = measure,method = method ,color = ann_colors_group$BMI,my_comparisons= my_comparisons,size=15,
+                            level_factors = c('bmi<=25','25<bmi<=30','bmi>30'))
+
+size <- c(3,1)
+
+figure_metaphlan <- ggarrange(beta,alpha,nrow=1,ncol=2 , widths  = size)
+
+ps_obj <- ps_mag
+
+level <- 'Species'
+det <- 10
+prev<-10/100
+
+ps_obj <- speedyseq::tax_glom(ps_obj,taxrank = level, NArm=T )
+taxas <- core_members(ps_obj, detection = det, prevalence = prev)
+ps_obj <- prune_taxa(taxas, ps_obj)
+ps_obj <- subset_samples(ps_obj,(ps_obj@sam_data$Without_repeats =='True' )) 
+ps_obj <- subset_taxa(ps_obj,Kingdom != 'UNCLASSIFIED')
+list_of_unique <- c('V350181201_26','V350181201_27','V350181201_28')
+ps_obj <- subset_samples(ps_obj,!rownames(ps_obj@sam_data) %in% list_of_unique )
+
+trans <- 'clr'
+
+distance_method <- 'euclidean'
+
+ps_obj_transform <- microbiome::transform(ps_obj, trans)
+
+ann_colors_group <- list(BMI = c(
+  'bmi<=25' ='#2a9d8f',
+  '25<bmi<=30' = '#f77f00',
+  'bmi>30' ='#c1121f'
+))
+
+ps_obj_transform@sam_data$bmi_group <- factor(ps_obj_transform@sam_data$bmi_group, level = c('bmi<=25','25<bmi<=30','bmi>30'))
+
+beta <- create_ordination_plots(ps_obj_transform, method = "PCoA", distance_method = distance_method , group = "bmi_group", size = 15,palette = ann_colors_group$BMI,
+                                level_factors = c('bmi<=25','25<bmi<=30','bmi>30'),taxa_plot = TRUE,len_axis=5)
+
+measure <- 'Shannon'
+method <- 'wilcox.test'
+
+trans <- 'compositional'
+distance_method <- 'bray'
+
+
+ps_obj_transform <- microbiome::transform(ps_obj, trans)
+
+my_comparisons <- list(c('bmi<=25','bmi>30'),c('bmi<=25','25<bmi<=30'),c('25<bmi<=30','bmi>30'))
+ps_obj_transform@sam_data$bmi_group <- factor(ps_obj_transform@sam_data$bmi_group, level = c('bmi<=25','25<bmi<=30','bmi>30'))
+alpha <- create_alpha_plots(ps_obj_transform,col = 'bmi_group',measure = measure,method = method ,color = ann_colors_group$BMI,my_comparisons= my_comparisons,size=15,
+                            level_factors = c('bmi<=25','25<bmi<=30','bmi>30'))
+
+size <- c(3,1)
+
+figure_mag <- ggarrange(beta,alpha,nrow=1,ncol=2 , widths  = size)
+figure_mag
+plot_3 <-  figure_metaphlan/figure_mag
+plot_3
+ggsave("./figures/Fig4.png", plot=plot_3, width=15, height=18,dpi=300)
+#ggsave("./figures/Fig4.pdf", plot=plot_3, width=15, height=18,dpi=300)
+```
+# Heatmap
+```{r,fig.width=8,fig.height=8}
+library(ComplexHeatmap)
+library(circlize)
+
+ps_obj <- ps_metaphlan
+det <- 10
+prev <- 10/100
+
+
+level = 'Species'
+ps_obj <- speedyseq::tax_glom(ps_obj,taxrank = level, NArm=T )
+
+taxas <- core_members(ps_obj, detection = det, prevalence = prev)
+ps_obj <- prune_taxa(taxas, ps_obj)
+ps_obj <- subset_samples(ps_obj,(ps_obj@sam_data$Without_repeats =='True' ))
+ps_obj <- subset_taxa(ps_obj,Kingdom != 'UNCLASSIFIED')
+list_of_unique <- c('V350181201_26','V350181201_27','V350181201_28')
+ps_obj <- subset_samples(ps_obj,!rownames(ps_obj@sam_data) %in% list_of_unique )
+
+
+ps_obj_transform <- microbiome::transform(ps_obj, 'clr')
+otu_table <- as.data.frame(otu_table(ps_obj_transform))
+sample_data <- as.data.frame(sample_data(ps_obj_transform))
+tax_table <- as.data.frame(tax_table(ps_obj_transform))
+
+
+meta_cols <- as.data.frame(ps_obj@sam_data)
+
+meta_cols$bmi_group <- as.factor(meta_cols$bmi_group)
+group_annotations <- meta_cols$bmi_group[match(rownames(otu_table), rownames(meta_cols))]
+group_annotations <- factor(group_annotations, levels = c('bmi<=25', '25<bmi<=30', 'bmi>30'))
+
+# Create heatmap annotation
+#, 
+                        #col = annotation_colors)
+meta_for_heat <- as.data.frame(ps_obj@tax_table)
+tax_annotations_phylum <- meta_for_heat$Phylum[match(colnames(otu_table), rownames(meta_for_heat))]
+
+colnames(otu_table)<- paste0(colnames(otu_table),'_',
+                             tax_table[colnames(otu_table),'Genus'],
+                         '_',tax_table[colnames(otu_table),'Species']    )
+
+ann_colors_group <- list(BMI = c(
+  'bmi<=25' ='#2a9d8f',
+  '25<bmi<=30' = '#f77f00',
+  'bmi>30' ='#c1121f'
+))
+
+
+ann_colors <-list(Phylum = c(
+  "Euryarchaeota"               = '#cdb4db',
+"Thaumarchaeota"             = '#ffafcc' ,
+"Actinobacteria"              = '#2d00f7',
+"Bacteria_unclassified"      = '#606c38',
+"Bacteroidetes"               = '#e01e37', 
+"Candidatus_Melainabacteria" = '#669bbc',
+"Candidatus_Saccharibacteria" = '#283618',
+"Firmicutes"                 = '#ffea00',
+"Fusobacteria"                = '#dda15e',
+"Lentisphaerae"              = '#bc6c25',
+"Proteobacteria"              = '#bde0fe',
+"Synergistetes"              = '#ffb703',
+"Tenericutes"                 = '#fefae0',
+"Verrucomicrobia"            = '#a7c957',
+"Ascomycota" = '#4a4e69',
+'Candidatus_Thermoplasmatota' ='#003049',
+'Cyanobacteria' = '#780000',             
+'Elusimicrobia' = '#006466',            
+'Spirochaetes' = '#4d194d'
+))
+unique(tax_table$Phylum)
+
+ha <- rowAnnotation(Phylum = tax_annotations_phylum, 
+                    col = ann_colors,
+                    annotation_legend_param = list(Phylum = list(nrow = 4),labels_gp = gpar(fontsize = 8)))
+
+# Create top annotation for BMI with horizontal legend
+ta <- HeatmapAnnotation(BMI = group_annotations, 
+                        col = ann_colors_group,
+                        annotation_legend_param = list(BMI = list(ncol = 1)))
+
+if (any(is.na(tax_annotations_phylum))) {
+  warning("Some paths in 'cc' do not match any paths in 'meta_cols'.")
+}
+
+
+color_func <- colorRamp2(c(min(otu_table),0,max(otu_table)), c("#21b0fe","white", "#c9184a"))
+hr <- hclust(dist(otu_table, method = "euclidean"), method="ward.D2") 
+hc <- hclust(dist(t(otu_table), method = "euclidean"), method="ward.D2")
+
+library(circlize)
+
+heatmap_object_metaphlan <- Heatmap(t(otu_table), cluster_rows=hc, cluster_columns=hr,
+                          width = unit(10, "cm"), height = unit(10, "cm"),
+                          row_names_gp    = gpar(fontsize = 0),
+                          column_names_gp = gpar(fontsize = 0),
+                          col = color_func,
+                          column_names_rot = 45,
+                          left_annotation = ha,
+                          top_annotation = ta,
+                          row_title = NULL,
+                          column_title = NULL,
+                          name = 'Clr MetaPhlAn',
+                          heatmap_legend_param = list(direction = "horizontal",legend_height = unit(4, "cm"),width=unit(10, "cm"),
+    labels_gp = gpar(fontsize = 8, fontface = "bold"),
+    title_gp = gpar(fontsize = 8, fontface = "bold")))
+draw(heatmap_object_metaphlan,heatmap_legend_side = "right", annotation_legend_side = "right",merge_legend = T)
+
+ps_obj <- ps_mag
+det <- 10
+prev <- 10/100
+
+
+level = 'Species'
+ps_obj <- speedyseq::tax_glom(ps_obj,taxrank = level, NArm=T )
+
+taxas <- core_members(ps_obj, detection = det, prevalence = prev)
+ps_obj <- prune_taxa(taxas, ps_obj)
+ps_obj <- subset_samples(ps_obj,(ps_obj@sam_data$Without_repeats =='True' ))
+ps_obj <- subset_taxa(ps_obj,Kingdom != 'UNCLASSIFIED')
+list_of_unique <- c('V350181201_26','V350181201_27','V350181201_28')
+ps_obj <- subset_samples(ps_obj,!rownames(ps_obj@sam_data) %in% list_of_unique )
+
+ps_obj_transform <- microbiome::transform(ps_obj, 'clr')
+otu_table <- as.data.frame(otu_table(ps_obj_transform))
+sample_data <- as.data.frame(sample_data(ps_obj_transform))
+tax_table <- as.data.frame(tax_table(ps_obj_transform))
+
+
+meta_cols <- as.data.frame(ps_obj@sam_data)
+
+meta_cols$bmi_group <- as.factor(meta_cols$bmi_group)
+group_annotations <- meta_cols$bmi_group[match(rownames(otu_table), rownames(meta_cols))]
+group_annotations <- factor(group_annotations, levels = c('bmi<=25', '25<bmi<=30', 'bmi>30'))
+
+# Create heatmap annotation
+#, 
+                        #col = annotation_colors)
+meta_for_heat <- as.data.frame(ps_obj@tax_table)
+tax_annotations_phylum <- meta_for_heat$Phylum[match(colnames(otu_table), rownames(meta_for_heat))]
+
+colnames(otu_table)<- paste0(colnames(otu_table),'_',
+                             tax_table[colnames(otu_table),'Genus'],
+                         '_',tax_table[colnames(otu_table),'Species']    )
+
+ann_colors_group <- list(BMI = c(
+  'bmi<=25' ='#2a9d8f',
+  '25<bmi<=30' = '#f77f00',
+  'bmi>30' ='#c1121f'
+))
+
+
+ann_colors <-list(Phylum = c(
+"Methanobacteriota"               = '#cdb4db',
+"Actinobacteriota"              = '#2d00f7',
+"Bacteroidota"               = '#e01e37', 
+"Firmicutes_A"                 = '#ffea00',
+"Proteobacteria"              = '#bde0fe',
+"Verrucomicrobiota"            = '#a7c957',
+"Firmicutes" = '#4a4e69',
+'Firmicutes_C' ='#003049',
+'Desulfobacterota_I' = 'pink'
+))
+
+
+#unique(tax_table$Phylum)
+
+ha <- rowAnnotation(Phylum = tax_annotations_phylum, 
+                    col = ann_colors,
+                    annotation_legend_param = list(Phylum = list(nrow = 3),labels_gp = gpar(fontsize = 8)))
+
+# Create top annotation for BMI with horizontal legend
+ta <- HeatmapAnnotation(BMI = group_annotations, 
+                        col = ann_colors_group,
+                        annotation_legend_param = list(BMI = list(ncol = 1)))
+
+if (any(is.na(tax_annotations_phylum))) {
+  warning("Some paths in 'cc' do not match any paths in 'meta_cols'.")
+}
+
+
+color_func <- colorRamp2(c(min(otu_table),0,max(otu_table)), c("#21b0fe","white", "#c9184a"))
+hr <- hclust(dist(otu_table, method = "euclidean"), method="ward.D2") 
+hc <- hclust(dist(t(otu_table), method = "euclidean"), method="ward.D2")
+
+
+heatmap_object_mag <- Heatmap(t(otu_table), cluster_rows=hc, cluster_columns=hr,
+                          width = unit(8, "cm"),height =  unit(10, "cm"),
+                          row_names_gp    = gpar(fontsize = 0),
+                          column_names_gp = gpar(fontsize = 0),
+                          col = color_func,
+                          column_names_rot = 45,
+                          left_annotation = ha,
+                          top_annotation = ta,
+                          row_title = NULL,
+                          column_title = NULL,
+                          name = 'Clr de novo',
+                          heatmap_legend_param = list(direction = "horizontal",legend_height = unit(4, "cm"),
+    labels_gp = gpar(fontsize = 8, fontface = "bold"),
+    title_gp = gpar(fontsize = 8, fontface = "bold")))
+draw(heatmap_object_mag,heatmap_legend_side = "top", annotation_legend_side = "top",merge_legend = T)
+
+heatmap_grob_metaphlan <- grid::grid.grabExpr({
+  draw(heatmap_object_metaphlan,heatmap_legend_side = "right", annotation_legend_side = "right",merge_legend = T)
+})
+
+
+heatmap_plot_metaphlan <- plot_grid(heatmap_grob_metaphlan, labels = 'A') # This should be your heatmap grob
+heatmap_grob_mag <- grid::grid.grabExpr({
+  draw(heatmap_object_mag,heatmap_legend_side = "right", annotation_legend_side = "right",merge_legend = T)
+})
+
+
+heatmap_plot_mag <- plot_grid(heatmap_grob_mag, labels = 'B')
+
+# Create the final layout
+final_plot <- heatmap_plot_metaphlan | heatmap_plot_mag
+
+
+# Adjusting heights and widths
+#final_plot <- final_plot + 
+#  plot_layout(heights = c(1, 1), widths = c(1, 1))
+final_plot
+
+# Save as PNG with DPI = 300
+ggsave("./figures/heatmaps.png", plot = final_plot, width = 13, height = 6, dpi = 300)
+```
+
+```{r}
+
+ps_obj <- ps_mag
+ps_obj <- subset_samples(ps_obj,(ps_obj@sam_data$Without_repeats =='True' )) 
+list_of_unique <- c('V350181201_26','V350181201_27','V350181201_28')
+ps_obj <- subset_samples(ps_obj,!rownames(ps_obj@sam_data) %in% list_of_unique )
+saveRDS(ps_obj, '/mnt/disk1/PROJECTS/DAVID_WGS/taxa/MAG_all_da/data/MAG/MAG.rds')
+ps_obj <- ps_metaphlan
+ps_obj <- subset_samples(ps_obj,(ps_obj@sam_data$Without_repeats =='True' )) 
+list_of_unique <- c('V350181201_26','V350181201_27','V350181201_28')
+ps_obj <- subset_samples(ps_obj,!rownames(ps_obj@sam_data) %in% list_of_unique )
+saveRDS(ps_obj, '/mnt/disk1/PROJECTS/DAVID_WGS/taxa/metaphlan_SGB/data/MAG/MAG.rds')
+ps_obj@sam_data$YEAR
+
+
+level <- 'Species'
+det <- 10
+prev<- 20/100
+
+
+ps_obj <- speedyseq::tax_glom(ps_obj,taxrank = level, NArm=T )
+taxas <- core_members(ps_obj, detection = det, prevalence = prev)
+ps_obj <- prune_taxa(taxas, ps_obj)
+ps_obj
+
+ps_obj@tax_table['Species' == 'Alistipes_onderdonkii',]
+ps_obj@tax_table %>%
+  data.frame() %>%
+  filter(Genus == 'Alistipes')
+
+rownames(ps_obj@otu_table)
+ps_obj@sam_data %>%
+  data.frame()%>%
+  dplyr::count(sex)
+```

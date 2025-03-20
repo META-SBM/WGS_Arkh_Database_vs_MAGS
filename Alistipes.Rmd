@@ -1,0 +1,379 @@
+#libraries
+```{r}
+library(ggtree)
+
+library(ggtreeExtra)
+library(phytools)
+
+library(ggplot2)
+library(ggnewscale)
+ps <- readRDS('./DATA/metaphlann_sgb.rds')
+ps_mag <- readRDS('./DATA/mag.rds')
+library(dplyr)
+```
+# create phyl.tree Alistipes onderdonkii
+```{r,fig.width=10}
+library(ggnewscale)
+
+tree <- read.newick('./DATA/Alistipes_ondrenokii_tree_rooted.txt')
+
+tree$tip.label <- sub(".fa", "", tree$tip.label)
+
+
+ps <- merge_phyloseq(ps_mag,tree)
+species <- 'Alistipes'
+
+ps@sam_data$ID_KYH <- as.factor(ps@sam_data$ID_KYH)
+
+df <- as.data.frame(sample_data(ps))
+df$BMI_correct <- df$weight_kg/(df$mean_height_cm/100)**2
+df$BMI_correct <- as.numeric(df$BMI_correct)
+df$year <- df$YEAR
+df$bmi_group <- ifelse(df$BMI_correct <= 25, 'bmi<=25',
+            ifelse(df$BMI_correct <= 30, '25<bmi<=30',
+            'bmi>30'))
+
+df$bmi_group <- factor(df$bmi_group,levels=c('bmi<=25','25<bmi<=30','bmi>30'))
+ps@sam_data <- sample_data(df)
+
+
+p <- ggtree(ps, size=0.8,branch.length='none', layout='circular')
+
+
+ann_colors_group <- list(BMI = c(
+  'bmi<=25' ='#9bc1bc',
+  '25<bmi<=30' = '#f4f1bb',
+  'bmi>30' ='#ed6a5a'
+))
+
+p2 <- p +
+     new_scale_fill() +
+  geom_fruit(aes(fill = bmi_group), width = 2, offset = 0.1, 
+             size =2, geom = geom_tile) +
+  scale_fill_manual(values = ann_colors_group$BMI) +
+  labs(fill = "bmi_group")
+
+p2 <-p2+ theme_tree() + 
+         theme(
+           legend.position = "right",         # Position legend on the right
+           legend.title.align = 0.5,          # Center align legend title
+           plot.title = element_text(size = 14, face = "bold", hjust = 0.5), # Center title
+           axis.text.y = element_text(size = 10), # Adjust y-axis text size
+           axis.title.y = element_blank(),     # Remove y-axis title if not needed
+           panel.background = element_blank(),  # Remove background grid
+           panel.grid.major = element_blank(),  # Remove major grid lines
+           panel.grid.minor = element_blank()   # Remove minor grid lines
+         ) +
+         ggtitle(paste("Phylogenetic Tree on ",species))
+p2 +
+     new_scale_fill() +
+  geom_tiplab(aes(label= ID_KYH), width = 2, offset = 4, 
+             size =4) 
+
+#p2 <-p2+ geom_tiplab(offset = 7, hjust = .5) 
+p2
+
+```
+
+#ANI
+```{r,fig.height=5,fig.width=8}
+library(ComplexHeatmap)
+ps_obj <- ps
+ps_obj <- subset_taxa(ps_obj ,Species %in% c('Alistipes onderdonkii'))
+
+ps_obj
+
+
+ani <- read.csv('./DATA/Alistipes_ANI/ANIm_percentage_identity.tab',sep='\t',row.names = 1)
+metadata <- read.csv('./DATA/filt_df_pheno_wgs.csv',sep=',',row.names = 1)
+
+metadata <- as.data.frame(metadata)
+
+
+df <- as(ps_obj@tax_table,'data.frame')
+#metadata$YEAR
+df$bin_name <- rownames(df)
+df$sample <- sapply(strsplit(rownames(df), split = "[_\\.]"),function(x) paste(x[1], x[2], sep = "_"))
+df <- merge(df,metadata,by.x='sample',by.y='row.names',all.x=T)
+#merge(df,metadata,by.x='sample',by.y='row.names',all.x=T)
+rownames(df) <- df$bin_name
+df$BMI_correct <- df$weight_kg/(df$mean_height_cm/100)**2
+df$BMI_correct <- as.numeric(df$BMI_correct)
+df$year <- df$YEAR
+df$bmi_group <- ifelse(df$BMI_correct <= 25, 'bmi<=25',
+            ifelse(df$BMI_correct <= 30, '25<bmi<=30',
+            'bmi>30'))
+
+df$bmi_group <- factor(df$bmi_group,levels=c('bmi<=25','25<bmi<=30','bmi>30'))
+
+df <- df %>%
+  dplyr::select(bmi_group)
+df
+df_annotation <- data.frame(BMI = df$bmi_group, row.names = rownames(df))
+
+
+# Define colors for BMI groups
+
+c
+
+
+# Order the ANI data based on the ordered factors in df_annotation
+df_annotation$BMI <- factor(df_annotation$BMI, levels=c('bmi<=25','25<bmi<=30','bmi>30'))
+
+# Sort df_annotation by BMI
+df_annotation <- df_annotation[order(df_annotation$BMI), , drop = FALSE]
+ha <- rowAnnotation(BMI = df_annotation$BMI, col = ann_colors_group)
+
+# Create heatmap annotation (if needed)
+ta <- HeatmapAnnotation(BMI = df_annotation$BMI, col = ann_colors_group)
+# Reorder ani rows and columns based on sorted df_annotation
+ani_ordered <- ani[rownames(df_annotation), rownames(df_annotation)]
+hr <- hclust(dist(ani_ordered, method = "euclidean"), method="ward.D2") 
+hc <- hclust(dist(t(ani_ordered), method = "euclidean"), method="ward.D2")
+# Generate the heatmap
+heatmap_object <- Heatmap(as.matrix(ani_ordered), 
+                          cluster_rows=T, 
+                          cluster_columns=T,
+                          #row_split = df_annotation$BMI,
+                          col = colorRampPalette(c("yellow", "red"))(10),
+                          width=100, height=200,
+                          row_names_gp=gpar(fontsize=5),
+                          column_names_gp=gpar(fontsize=0),
+                          column_names_rot=45,
+                          left_annotation=ha,
+                          top_annotation=ta,
+                          row_title=NULL,
+                          column_title=NULL,
+                          name='Alistipes onderdonkii ANI values\n with hclust ward.D2',
+                          heatmap_legend_param=list(direction="horizontal"))
+
+# Draw the heatmap with legends positioned at the top
+#draw(heatmap_object, heatmap_legend_side="top", annotation_legend_side="top", merge_legend=TRUE)
+
+summary(df_annotation$BMI)
+p1 <- ComplexHeatmap::pheatmap(as.matrix(ani_ordered),annotation_col = df_annotation, annotation_row = df_annotation, 
+    annotation_colors = ann_colors_group,cluster_cols =F,
+    cluster_rows = F,
+    color = colorRampPalette(c("yellow", "red"))(10),
+    border_color=NA,
+    #gaps_row=c(45,43),
+    row_split = df_annotation$BMI,
+    column_split = df_annotation$BMI,
+    #gaps_col=c(45,43,14),
+    #cellheight = 6,
+     #cellwidth = 20,
+     fontsize_row = 6,
+    show_rownames =F,
+    show_colnames= F,
+    annotation_legend = F,
+    name = 'Alistipes onderdonkii ANI values\n without hclust',
+    heatmap_legend_param=list(direction="horizontal")
+    )
+
+library(patchwork)
+library(cowplot)
+
+heatmap_grob <- grid::grid.grabExpr({
+  draw(heatmap_object,heatmap_legend_side = "top", annotation_legend_side = "top",merge_legend = T)
+})
+heatmap_grob1 <- grid::grid.grabExpr({
+  draw(p1,heatmap_legend_side = "top", annotation_legend_side = "top",merge_legend = T)
+})
+
+
+heatmap_plot <- plot_grid(heatmap_grob) # This should be your heatmap grob
+heatmap_plot | plot_grid(heatmap_grob1)
+
+```
+time point
+```{r}
+# Load necessary libraries
+library(ComplexHeatmap) # For creating complex heatmaps
+library(stringr) # For string manipulation
+library(microbiome) # For microbiome analysis
+
+# Read the ANI (Average Nucleotide Identity) matrix from a tab-separated file
+ani <- read.csv('./DATA/Alistipes_ANI/ANIm_percentage_identity.tab',sep='\t',row.names = 1)
+
+# Read metadata from a comma-separated file
+metadata <- read.csv('./DATA/filt_df_pheno_wgs.csv',sep=',',row.names = 1)
+
+# Filter the phyloseq object to only include Alistipes onderdonkii
+ps_obj <- ps_mag # Assign ps_mag to ps_obj (assuming ps_mag is defined elsewhere)
+ps_obj <- subset_species(ps_obj,Species == 'Alistipes onderdonkii') # Subset to Alistipes onderdonkii
+
+# Extract the OTU table from the phyloseq object
+otu_tab <- as.data.frame(ps_obj@otu_table)
+
+# Extract sample data from the phyloseq object
+df <- as(ps_obj@sam_data,'data.frame')
+df$sample_name <- rownames(df)
+
+# Group metadata by ID_KYH and concatenate sample names
+grouped_meta <- df %>%
+  group_by(ID_KYH) %>%
+  summarize(sample_names = paste(sample_name, collapse = ", "))
+
+# Function to extract sample name from bin name
+extract_sample_name <- function(bin_name) {
+  parts <- strsplit(bin_name, "_")[[1]] # Split the bin name by underscore
+  id <- parts[1] # Get the first part as ID
+  second_part <- strsplit(parts[2], "\\.")[[1]][1] # Split the second part by dot and take the first element
+  sample_name <- paste(id, second_part, sep = "_") # Combine ID and second part with underscore
+  return(sample_name)
+}
+
+# Apply the function to extract sample names from OTU table column names
+names <- sapply(colnames(otu_tab),extract_sample_name)
+
+# Function to count matches between sample names and row sample names
+count_matches <- function(row_sample_names, sample_names_list) {
+  count <- 0
+  for (name in sample_names_list) {
+    if (str_detect(row_sample_names, fixed(name))) { # fixed() ensures the string is searched as is
+      print(paste(row_sample_names,':',name)) # Print matching names
+      count <- count + 1 # Increment count if a match is found
+    }
+  }
+  return(count)
+}
+
+# Count the number of sample name matches for each group in grouped_meta
+grouped_meta <- grouped_meta %>%
+  rowwise() %>%  # Apply the function row-wise
+  mutate(count = count_matches(sample_names, names)) # Create a new column 'count'
+
+# Filter groups where the count is equal to 2
+grouped_meta_filter <- grouped_meta %>%
+  filter(count ==2)
+
+# Split the sample names in the filtered groups
+sample_names_split <- unlist(strsplit(unlist(grouped_meta_filter$sample_names), ",\\s*"))
+
+# Trim leading/trailing whitespace from sample names
+sample_names_trimmed <- trimws(sample_names_split)
+
+# Get unique sample names
+unique_sample_names <- unique(sample_names_trimmed)
+
+# Print the unique sample names
+print(unique_sample_names)
+
+# Subset the phyloseq object to only include samples with unique sample names
+ps_obj <- subset_samples(ps_obj,rownames(ps_obj@sam_data) %in% unique_sample_names)
+
+# Filter taxa based on prevalence and detection thresholds
+det <- 1 # Detection threshold
+prev <- 0/100 # Prevalence threshold
+taxas <- core_members(ps_obj, detection = det, prevalence = prev) # Identify core members
+ps_obj <- prune_taxa(taxas, ps_obj) # Prune the phyloseq object
+
+# Convert the ANI matrix to a data frame
+ani_df <- as.data.frame(ani)
+
+# Filter the rows and columns of ANI matrix to match the sample names in the phyloseq object
+ani_filtered <- ani_df %>%
+  filter(rownames(.) %in% colnames(ps_obj@otu_table)) %>% # Filter rows
+  select(any_of(colnames(ps_obj@otu_table))) # Filter columns
+
+# Extract the taxonomy table from the phyloseq object
+df <- as(ps_obj@tax_table,'data.frame')
+
+# Add bin name as a column
+df$bin_name <- rownames(df)
+
+# Create a 'sample' column by splitting the bin names. This assumes a specific naming convention.
+df$sample <- sapply(strsplit(rownames(df), split = "[_\\.]"),function(x) paste(x[1], x[2], sep = "_"))
+
+# Merge the taxonomy data frame with the metadata using the 'sample' column as the key.
+df <- merge(df,metadata,by.x='sample',by.y='row.names',all.x=T)
+
+# Set the row names to bin_name
+rownames(df) <- df$bin_name
+
+# Calculate BMI from weight (kg) and height (cm)
+df$BMI_correct <- df$weight_kg/(df$mean_height_cm/100)**2
+
+# Ensure BMI is numeric
+df$BMI_correct <- as.numeric(df$BMI_correct)
+
+#Create BMI Groups
+df$bmi_group <- ifelse(df$BMI_correct <= 25, 'bmi<=25',
+            ifelse(df$BMI_correct <= 30, '25<bmi<=30',
+            'bmi>30'))
+
+# Create BMI Groups
+df$bmi_group <- factor(df$bmi_group,levels=c('bmi<=25','25<bmi<=30','bmi>30'))
+
+#Select bmi_group,ID_KYH columns
+df <- df %>%
+  select(bmi_group,ID_KYH)
+
+#Create annotation data.frame
+df_annotation <- data.frame(BMI = df$bmi_group, ID_KYH = df$ID_KYH ,row.names = rownames(df))
+
+#Define color scheme
+ann_colors_group <- list(BMI = c(
+  'bmi<=25' ='#9bc1bc',
+  '25<bmi<=30' = '#f4f1bb',
+  'bmi>30' ='#ed6a5a'
+),
+ ID_KYH = c('1057900'='#9381ff',
+           '1060209'='#ff594c',
+           '1062453'='#34b9ed',
+           '1064676'='#cc7daa',
+           '1086758'='#1d8dcf',
+           '1102033'='#024cc1',
+           '1160586'='#f0e74c',
+           '1179444'='#a100bf',
+           '1185032'='#bf4380')
+)
+
+#Create annotation object
+ha <- rowAnnotation(ID_KYH = df_annotation$ID_KYH,BMI= df_annotation$BMI,col = ann_colors_group,
+                    annotation_legend_param = list(ID_KYH = list(ncol = 2,color='black'))
+                    )
+
+# Calculate hierarchical clustering for rows and columns of the ANI matrix
+hr <- hclust(dist(ani_filtered, method = "euclidean"), method="ward.D2") # Rows
+hc <- hclust(dist(t(ani_filtered), method = "euclidean"), method="ward.D2") # Columns
+
+# Create the heatmap
+heatmap_object <- Heatmap(as.matrix(ani_filtered), 
+                          cluster_rows=T, # Cluster rows
+                          cluster_columns=T, # Cluster columns
+                          #row_split = df_annotation$BMI,
+                          col = colorRampPalette(c("yellow", "red"))(10), # Color scheme
+                          width=100, height=200, # width and height
+                          row_names_gp=gpar(fontsize=0), # Row name font size
+                          column_names_gp=gpar(fontsize=0), # Column name font size
+                          column_names_rot=45, # Rotate column names
+                          left_annotation=ha, # Left annotation
+                          #top_annotation=ta,
+                          row_title=NULL, # Row title
+                          column_title=NULL, # Column title
+                          name='Alistipes onderdonkii ANI values\n with hclust ward.D2', # Heatmap name
+                          heatmap_legend_param=list(direction="horizontal")) # Legend parameters
+
+heatmap_object # show the plot
+
+
+
+
+```
+
+```{r}
+ps@tax_table['Genus'=='Alistipes',]
+ps@tax_table
+ps@tax_table %>%
+  as.data.frame()%>%
+  dplyr::filter(Genus == 'Alistipes')
+ps_mag@tax_table %>%
+  as.data.frame() %>%
+  dplyr::filter(Genus == 'Alistipes') %>%
+  dplyr::distinct(Species,.keep_all = TRUE)
+  
+unique(ps_mag@tax_table['Genus'=='Alistipes','Species'])
+```
+
+```

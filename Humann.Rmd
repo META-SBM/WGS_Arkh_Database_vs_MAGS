@@ -1,0 +1,129 @@
+#library
+```{r}
+library(stringr)
+library(dplyr)
+library(ComplexHeatmap)
+library(vegan)
+library(ggpubr)
+```
+#Colors
+```{r}
+c25 <- c("gray70",
+  "dodgerblue2", "#E31A1C", # red
+  "green4",
+  "#6A3D9A", # purple
+  "#FF7F00", # orange
+   "gold1",
+  "skyblue2", "#FB9A99", # lt pink
+  "palegreen2",
+  "#CAB2D6", # lt purple
+  "#FDBF6F", # lt orange
+   "khaki2",
+  "maroon", "orchid1", "deeppink1", "blue1", "steelblue4",
+  "darkturquoise", "green1", "yellow4", "yellow3",
+  "darkorange4", "brown","magenta"  ,      'orange',                     
+ 'skyBlue',
+ 'Green',                   
+ 'yellow',                      
+  'blue',                      
+  'aquamarine',
+ '#DC3220',
+  '#4B0092',
+  '#E1BE6A',
+  'black',
+ '#40B0A6',
+  '#994F00',
+  "pink3","black"
+)
+c10 <- c('#9381ff','#ff594c',
+'#34b9ed','#cc7daa',
+'#1d8dcf',
+'#024cc1','#f0e74c',
+'#a100bf',
+
+'#bf4380',
+
+'#f7b126'
+)
+```
+# DATA
+```{r}
+# METACYC
+ps <- readRDS("./DATA/humann_bact_metacyc.rds")
+tax_table <- ps@tax_table %>%
+  as.data.frame()
+
+#L-ascorbate biosynthesis
+#tax_table['full_name.y' == '']
+sorted_table <- tax_table %>%
+  arrange(
+    ifelse(str_detect(full_name.y, '^L-ascorbate biosynthesis'), 0, 1),
+    full_name.y
+  )
+
+
+print(sorted_table)
+
+#KO
+ps <- readRDS('./DATA/humann_bact_ko.rds')
+tax_table <- ps@tax_table %>%
+  as.data.frame()
+tax_table %>%
+  filter(Pathway == 'K06221')
+```
+
+#PERMANOVA
+```{r,fig.width = 20,fig.height=10}
+ps<- readRDS('./DATA/humann.rds')
+#saveRDS(ps_obj,'~/DAVID_WGS/pathway/humann/humann_DA/data/MAG/MAG.rds')
+
+source("./code/permanova.R")
+
+ps_obj <- ps
+
+det <- 2
+prev<- 5/100
+
+taxas <- core_members(ps_obj, detection = det, prevalence = prev)
+ps_obj <- prune_taxa(taxas, ps_obj)
+ps_obj <- subset_samples(ps_obj,(ps_obj@sam_data$Without_repeats =='TRUE'))
+
+list_of_unique <- c('V350181201_26','V350181201_27','V350181201_28')
+ps_obj <- subset_samples(ps_obj,!rownames(ps_obj@sam_data) %in% list_of_unique )
+ps_obj@sam_data$year <- ps_obj@sam_data$YEAR
+
+formula <- 'sex + age_at_heath_check_10yr  + cancer+ kidney_disease + drinking_level  + liver_diseases + smoking_status + bmi_group + year'#+ batch'
+
+cols_meta <- data.frame(
+  category = c('general','general','comorbidities'
+            ,'comorbidities','lifestyle',
+            'comorbidities','lifestyle','comorbidities','batch'),#,'technical'), 
+  row.names = c( "sex",'age_at_heath_check_10yr','cancer','kidney_disease','drinking_level',
+               
+                  'liver_diseases','smoking_status','bmi_group','year' ))#, 'batch'))
+
+cols_meta$new_name <- rownames(cols_meta)
+
+methods <- c('euclidean')#,'unifrac','wunifrac')
+# Run the plot_permanova function for both methods
+threshold <- 0
+
+plot_list <- purrr::map(methods, ~ {
+  tryCatch({
+    plot_permanova(ps_obj, formula, method = .x, 
+                   show_plot = TRUE, level = level, 
+                   det = det, prev = prev, 
+                   year = year, lab.size = lab.size, 
+                   size = 15, cols_meta= cols_meta,palette=c10,threshold =threshold ,threshold_loc_y = 16)
+  }, error = function(e) {
+    message(paste("Error in method:", .x))
+    message(e$message)  # Print the error message
+    return(NULL)  # Return NULL for this iteration
+  })
+})
+
+plot_list
+figure_Permanova_humann <- ggarrange(plotlist = list(plot_list[[1]][[2]]),nrow =1,ncol = 1)
+
+ggsave("./figures/Permanova_humann.png", plot=figure_Permanova_humann, width=16, height=6, dpi=300)
+```

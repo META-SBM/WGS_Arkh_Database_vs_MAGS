@@ -1,0 +1,33 @@
+#heatmap to png metaphlan
+```{r}
+library(ComplexHeatmap)
+library(colorRamp2)
+lgd_signif = Legend(title = "significance", col_fun = colorRamp2(c(0, 0.05,0.1), c("#8c1c13", "#bf4342","#e7d7c1")), at = c(0, 0.05, 0.1), 
+    labels = c('0', '0.05','0.1'))
+deseq2__maaslin2_cplm_negbin_tmm_lm_clr_Lean_vs_Obesity_SGB_heatmap <- readRDS("./DATA/DA/deseq2__maaslin2_cplm_negbin_tmm_lm_clr_Lean_vs_Obesity_SGB_heatmap.rds")
+deseq2__maaslin2_cplm_negbin_tmm_lm_clr_Lean_vs_Obesity_SGB_heatmap
+png('./figures/DA_metaphlan_Lean_vs_Obesity.png', height = 6500, width = 6700,res=300)
+ draw(deseq2__maaslin2_cplm_negbin_tmm_lm_clr_Lean_vs_Obesity_SGB_heatmap, heatmap_legend_side = "top", annotation_legend_side = "top", merge_legend = TRUE,annotation_legend_list =c(lgd_signif),
+       ht_gap = unit(c(15, 15), "mm"))
+dev.off()
+```
+#heatmap to png mag
+```{r}
+lgd_signif = Legend(title = "significance", col_fun = colorRamp2(c(0, 0.05,0.1), c("#8c1c13", "#bf4342","#e7d7c1")), at = c(0, 0.05, 0.1), 
+    labels = c('0', '0.05','0.1'))
+deseq2__maaslin2_cplm_negbin_tmm_lm_clr_Lean_vs_Obesity_SGB_heatmap <- readRDS("./DATA/DA/deseq2__maaslin2_cplm_negbin_tmm_lm_clr_Lean_vs_Obesity_heatmap_mag.rds")
+png('./figures/DA_MAG_Lean_vs_Obesity.png', height = 4000, width = 4000,res=300)
+ draw(deseq2__maaslin2_cplm_negbin_tmm_lm_clr_Lean_vs_Obesity_SGB_heatmap, heatmap_legend_side = "top", annotation_legend_side = "top", merge_legend = TRUE,annotation_legend_list =c(lgd_signif),
+       ht_gap = unit(c(10, 10), "mm"))
+dev.off()
+```
+#heatmap to png humann
+```{r}
+lgd_signif = Legend(title = "significance", col_fun = colorRamp2(c(0, 0.05, 0.1), c("#8c1c13", "#bf4342","#e7d7c1")), at = c(0, 0.05, 0.1), 
+    labels = c('0', '0.05', '0.1'))
+deseq2__maaslin2_cplm_negbin_tmm_lm_clr_Lean_vs_Obesity_heatmap <- readRDS("./DATA/DA/deseq2__maaslin2_cplm_negbin_tmm_lm_clr_Lean_vs_Obesity_heatmap_humann.rds")
+png('./figures/DA_Humann_Lean_vs_Obesity.png', height = 5000, width = 7000,res=300)
+ draw(deseq2__maaslin2_cplm_negbin_tmm_lm_clr_Lean_vs_Obesity_heatmap, heatmap_legend_side = "top", annotation_legend_side = "top", merge_legend = TRUE,annotation_legend_list =c(lgd_signif),
+       ht_gap = unit(c(10, 10), "mm"))
+dev.off()
+```
