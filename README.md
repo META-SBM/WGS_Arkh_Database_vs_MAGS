@@ -1,6 +1,6 @@
 This repository contains materials for the article “Comparison of alignment and de-novo approaches for gut microbiota metagenomic data analysis.”
 
-The  folder `code` contains functions for calculating permanova, alpha and beta diversity and for drawing hierarchical clustering (Supplementary Figure 5).
+The  folder `code` contains functions for calculating permanova, alpha and beta diversity and for drawing hierarchical clustering.
 
 1. Exploratory.Rmd contain code for generating Fig 2, Fig3, Fig 4.
 2. DA.Rmd contain code for generating Fig 5 and 6.
