@@ -77,6 +77,7 @@ tax_table %>%
 ps<- readRDS('./DATA/humann.rds')
 #saveRDS(ps_obj,'~/DAVID_WGS/pathway/humann/humann_DA/data/MAG/MAG.rds')
 
+
 source("./code/permanova.R")
 
 ps_obj <- ps
