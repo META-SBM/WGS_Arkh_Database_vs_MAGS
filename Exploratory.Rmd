@@ -58,6 +58,7 @@ c10 <- c('#9381ff','#ff594c',
 # load phyloseq objects
 ```{r}
 ps_metaphlan <- readRDS('./DATA/metaphlann_sgb.rds')
+
 ps_mag <- readRDS('./DATA/mag.rds')
 ```
 
@@ -365,6 +366,7 @@ ggsave("./figures/Fig2.png", plot=final_plot, width=24, height=14, dpi=300)
 source("./code/permanova.R")
 
 ps_obj <- ps_metaphlan
+ps_metaphlan@sam_data$
 
 level <- 'Species'
 det <- 1
@@ -382,7 +384,7 @@ ps_obj
 
 
 
-formula <- 'sex + age_at_heath_check_10yr  + cancer+ kidney_disease + drinking_level  + liver_diseases + smoking_status + bmi_group + year'# + year'#+ batch'
+formula <- 'sex + age_at_heath_check_10yr  + cancer+ kidney_disease + drinking_level  + liver_diseases + smoking_status + bmi_group + YEAR'# 
 
 cols_meta <- data.frame(
   category = c('general','general','comorbidities'
@@ -390,7 +392,7 @@ cols_meta <- data.frame(
             'comorbidities','lifestyle','comorbidities','technical'), 
   row.names = c( "sex",'age_at_heath_check_10yr','cancer','kidney_disease','drinking_level',
                
-                  'liver_diseases','smoking_status','bmi_group','year' ))#, 'batch'))
+                  'liver_diseases','smoking_status','bmi_group','YEAR' ))#, 'batch'))
 
 cols_meta$new_name <- rownames(cols_meta)
 
@@ -433,7 +435,7 @@ ps_obj
 ps_obj@sam_data$batch <- as.factor(ps_obj@sam_data$YEAR)
 
 
-formula <- 'sex + age_at_heath_check_10yr  + cancer+ kidney_disease + drinking_level  + liver_diseases + smoking_status + bmi_group + year'# + year'#+ batch'
+formula <- 'sex + age_at_heath_check_10yr  + cancer+ kidney_disease + drinking_level  + liver_diseases + smoking_status + bmi_group + YEAR'# + year'#+ batch'
 
 cols_meta <- data.frame(
   category = c('general','general','comorbidities'
@@ -441,7 +443,7 @@ cols_meta <- data.frame(
             'comorbidities','lifestyle','comorbidities','technical'), 
   row.names = c( "sex",'age_at_heath_check_10yr','cancer','kidney_disease','drinking_level',
                
-                  'liver_diseases','smoking_status','bmi_group','year' ))#, 'batch'))
+                  'liver_diseases','smoking_status','bmi_group','YEAR' ))#, 'batch'))
 
 cols_meta$new_name <- rownames(cols_meta)
 
